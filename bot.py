@@ -1,63 +1,51 @@
 import os
-import requests
+import google.generativeai as genai
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-MODEL = "gpt-4o-mini"
+# Читаем ключ Gemini из переменных окружения Render
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+genai.configure(api_key=GEMINI_API_KEY)
 
-user_histories = {}
+MODEL_NAME = "gemini-1.5-flash"
 
-def ask_openai(user_id, prompt):
+generation_config = {
+    "temperature": 0.7,
+    "max_output_tokens": 150,
+}
+system_instruction = "Ты голосовой ассистент в умной колонке. Отвечай на русском языке максимально кратко (1-2 предложения), без списков и звездочек."
+
+model = genai.GenerativeModel(
+    model_name=MODEL_NAME,
+    generation_config=generation_config,
+    system_instruction=system_instruction
+)
+
+user_chats = {}
+
+def ask_gemini(user_id, prompt):
     if not prompt.strip():
         return "Слушаю тебя. О чем хочешь спросить?"
-        
-    history = user_histories.get(user_id, [])
-    history.append({"role": "user", "content": prompt})
     
-    if len(history) > 6:
-        history = history[-6:]
-
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {OPENAI_API_KEY}"
-    }
-    
-    messages = [
-        {"role": "system", "content": "Ты голосовой ассистент в умной колонке. Отвечай на русском языке максимально кратко (1-2 предложения), без списков и звездочек."}
-    ] + history
-
-    payload = {
-        "model": MODEL,
-        "messages": messages,
-        "max_tokens": 150,
-        "temperature": 0.7
-    }
-
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=3.0)
-        if resp.status_code != 200:
-            return f"Ошибка API: {resp.status_code} - {resp.text[:50]}"
-            
-        data = resp.json()
-        answer = data["choices"][0]["message"]["content"].strip()
+        if user_id not in user_chats:
+            user_chats[user_id] = model.start_chat(history=[])
+        
+        chat = user_chats[user_id]
+        response = chat.send_message(prompt)
+        answer = response.text.strip()
+        
         if not answer:
             return "Пустой ответ от модели."
-            
-        history.append({"role": "assistant", "content": answer})
-        user_histories[user_id] = history
         return answer
-    except requests.exceptions.Timeout:
-        return "Сеть подтупливает, повтори вопрос."
     except Exception as e:
-        return "Произошла ошибка связи."
+        return f"Ошибка Gemini: {str(e)[:60]}"
 
 @app.route("/", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
-        return "Bot is active and running!", 200
+        return "Gemini Bot is active and running!", 200
 
     try:
         data = request.get_json(force=True, silent=True) or {}
@@ -68,15 +56,15 @@ def webhook():
         is_new_session = session.get("new", False)
 
         if is_new_session and not command:
-            text = "ChatGPT на связи. Спрашивай!"
+            text = "Gemini на связи. Спрашивай!"
         elif command.lower() in ["хватит", "выход", "стоп", "пока"]:
-            user_histories.pop(user_id, None)
+            user_chats.pop(user_id, None)
             return jsonify({
                 "version": version,
                 "response": {"text": "До связи!", "end_session": True}
             })
         else:
-            text = ask_openai(user_id, command)
+            text = ask_gemini(user_id, command)
 
         return jsonify({
             "version": version,
