@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 GEMINI_API_KEY = "AQ.Ab8RN6KfkjxR7WKt90lTSkji0I3umUB9j2dd5it5mjplvQX0mg"
-MODEL = "gemini-flash-latest"
+MODEL = "gemini-1.5-flash"
 
 user_histories = {}
 
@@ -64,7 +64,6 @@ def ask_gemini(user_id, prompt):
 
 @app.route("/", methods=["GET", "POST"])
 def webhook():
-    # Отвечаем Render на его проверки здоровья
     if request.method == "GET":
         return "Bot is active and running!", 200
 
