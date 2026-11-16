@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 MODEL = "gpt-4o-mini"
 
 user_histories = {}
