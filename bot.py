@@ -1,46 +1,88 @@
 import os
-import google.generativeai as genai
+import requests
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Читаем ключ Gemini из переменных окружения Render
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-genai.configure(api_key=GEMINI_API_KEY)
-
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 MODEL_NAME = "gemini-1.5-flash"
 
-generation_config = {
-    "temperature": 0.7,
-    "max_output_tokens": 150,
-}
-system_instruction = "Ты голосовой ассистент в умной колонке. Отвечай на русском языке максимально кратко (1-2 предложения), без списков и звездочек."
-
-model = genai.GenerativeModel(
-    model_name=MODEL_NAME,
-    generation_config=generation_config,
-    system_instruction=system_instruction
-)
-
-user_chats = {}
+user_histories = {}
 
 def ask_gemini(user_id, prompt):
     if not prompt.strip():
         return "Слушаю тебя. О чем хочешь спросить?"
+        
+    history = user_histories.get(user_id, [])
     
+    # Формируем историю для Gemini REST API (роли: user и model)
+    gemini_contents = []
+    for h in history:
+        role = "user" if h["role"] == "user" else "model"
+        gemini_contents.append({
+            "role": role,
+            "parts": [{"text": h["content"]}]
+        })
+    
+    # Добавляем текущий запрос
+    gemini_contents.append({
+        "role": "user",
+        "parts": [{"text": prompt}]
+    })
+    
+    if len(gemini_contents) > 6:
+        gemini_contents = gemini_contents[-6:]
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent"
+    
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    # Поддерживаем и Bearer-токены (AQ.), и обычные API-ключи
+    params = {}
+    if GEMINI_API_KEY.startswith("AQ.") or GEMINI_API_KEY.startswith("ya29."):
+        headers["Authorization"] = f"Bearer {GEMINI_API_KEY}"
+    else:
+        params["key"] = GEMINI_API_KEY
+
+    payload = {
+        "contents": gemini_contents,
+        "system_instruction": {
+            "parts": [{"text": "Ты голосовой ассистент в умной колонке. Отвечай на русском языке максимально кратко (1-2 предложения), без списков и звездочек."}]
+        },
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": 150
+        }
+    }
+
     try:
-        if user_id not in user_chats:
-            user_chats[user_id] = model.start_chat(history=[])
-        
-        chat = user_chats[user_id]
-        response = chat.send_message(prompt)
-        answer = response.text.strip()
-        
+        resp = requests.post(url, headers=headers, params=params, json=payload, timeout=5.0)
+        if resp.status_code != 200:
+            return f"Ошибка API: {resp.status_code} - {resp.text[:80]}"
+            
+        data = resp.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return "Пустой ответ от модели."
+            
+        answer = candidates[0]["content"]["parts"][0]["text"].strip()
         if not answer:
             return "Пустой ответ от модели."
+            
+        # Сохраняем в историю
+        history.append({"role": "user", "content": prompt})
+        history.append({"role": "model", "content": answer})
+        if len(history) > 6:
+            history = history[-6:]
+        user_histories[user_id] = history
+        
         return answer
+    except requests.exceptions.Timeout:
+        return "Сеть подтупливает, повтори вопрос."
     except Exception as e:
-        return f"Ошибка Gemini: {str(e)[:60]}"
+        return f"Ошибка связи: {str(e)[:50]}"
 
 @app.route("/", methods=["GET", "POST"])
 def webhook():
@@ -58,7 +100,7 @@ def webhook():
         if is_new_session and not command:
             text = "Gemini на связи. Спрашивай!"
         elif command.lower() in ["хватит", "выход", "стоп", "пока"]:
-            user_chats.pop(user_id, None)
+            user_histories.pop(user_id, None)
             return jsonify({
                 "version": version,
                 "response": {"text": "До связи!", "end_session": True}
