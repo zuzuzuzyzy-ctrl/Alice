@@ -4,55 +4,50 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-GEMINI_API_KEY = "AQ.Ab8RN6KfkjxR7WKt90lTSkji0I3umUB9j2dd5it5mjplvQX0mg"
-MODEL = "gemini-1.5-flash"
+DEEPSEEK_API_KEY = "sk-d3358e073b1e46b0a8f8d28095adf708"
+MODEL = "deepseek-chat"
 
 user_histories = {}
 
-def ask_gemini(user_id, prompt):
+def ask_deepseek(user_id, prompt):
     if not prompt.strip():
         return "Слушаю тебя. О чем хочешь спросить?"
-
+        
     history = user_histories.get(user_id, [])
-    history.append({"role": "user", "parts": [{"text": prompt}]})
+    history.append({"role": "user", "content": prompt})
+    
+    if len(history) > 6:
+        history = history[-6:]
 
-    if len(history) > 4:
-        history = history[-4:]
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
+    url = "https://api.deepseek.com/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "X-goog-api-key": GEMINI_API_KEY
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
     }
+    
+    messages = [
+        {"role": "system", "content": "Ты голосовой ассистент в умной колонке. Отвечай на русском языке максимально кратко (1-2 предложения), без списков и звездочек."}
+    ] + history
 
     payload = {
-        "systemInstruction": {
-            "parts": [{
-                "text": "Ты голосовой ассистент Gemini в умной колонке. Отвечай на русском языке максимально кратко (1-2 предложения), без списков и звездочек."
-            }]
-        },
-        "contents": history,
-        "generationConfig": {
-            "maxOutputTokens": 150,
-            "temperature": 0.7
-        }
+        "model": MODEL,
+        "messages": messages,
+        "max_tokens": 150,
+        "temperature": 0.7,
+        "stream": False
     }
 
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=2.5)
         if resp.status_code != 200:
-            return f"Ошибка API: {resp.status_code}"
-
+            return f"Ошибка API: {resp.status_code} - {resp.text[:50]}"
+            
         data = resp.json()
-        candidates = data.get("candidates", [])
-        if not candidates or "content" not in candidates[0]:
-            return "Пустой ответ от модели."
-
-        answer = candidates[0]["content"].get("parts", [{}])[0].get("text", "").strip()
+        answer = data["choices"][0]["message"]["content"].strip()
         if not answer:
-            return "Не удалось получить текст ответа."
-
-        history.append({"role": "model", "parts": [{"text": answer}]})
+            return "Пустой ответ от модели."
+            
+        history.append({"role": "assistant", "content": answer})
         user_histories[user_id] = history
         return answer
     except requests.exceptions.Timeout:
@@ -74,32 +69,4 @@ def webhook():
         is_new_session = session.get("new", False)
 
         if is_new_session and not command:
-            text = "Gemini на связи. Спрашивай!"
-        elif command.lower() in ["хватит", "выход", "стоп", "пока"]:
-            user_histories.pop(user_id, None)
-            return jsonify({
-                "version": version,
-                "response": {"text": "До связи!", "end_session": True}
-            })
-        else:
-            text = ask_gemini(user_id, command)
-
-        return jsonify({
-            "version": version,
-            "response": {
-                "text": text,
-                "end_session": False
-            }
-        })
-    except Exception:
-        return jsonify({
-            "version": "1.0",
-            "response": {
-                "text": "Ошибка обработки запроса.",
-                "end_session": False
-            }
-        })
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+            text = "Дипсик на связи. Спра
