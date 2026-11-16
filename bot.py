@@ -4,12 +4,12 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-DEEPSEEK_API_KEY = "sk-d3358e073b1e46b0a8f8d28095adf708"
-MODEL = "deepseek-chat"
+OPENAI_API_KEY = "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"
+MODEL = "gpt-4o-mini"
 
 user_histories = {}
 
-def ask_deepseek(user_id, prompt):
+def ask_openai(user_id, prompt):
     if not prompt.strip():
         return "Слушаю тебя. О чем хочешь спросить?"
         
@@ -19,10 +19,10 @@ def ask_deepseek(user_id, prompt):
     if len(history) > 6:
         history = history[-6:]
 
-    url = "https://api.deepseek.com/chat/completions"
+    url = "https://api.openai.com/v1/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}"
+        "Authorization": f"Bearer {OPENAI_API_KEY}"
     }
     
     messages = [
@@ -33,12 +33,11 @@ def ask_deepseek(user_id, prompt):
         "model": MODEL,
         "messages": messages,
         "max_tokens": 150,
-        "temperature": 0.7,
-        "stream": False
+        "temperature": 0.7
     }
 
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=2.5)
+        resp = requests.post(url, headers=headers, json=payload, timeout=3.0)
         if resp.status_code != 200:
             return f"Ошибка API: {resp.status_code} - {resp.text[:50]}"
             
@@ -69,7 +68,7 @@ def webhook():
         is_new_session = session.get("new", False)
 
         if is_new_session and not command:
-            text = "Дипсик на связи. Спрашивай!"
+            text = "ChatGPT на связи. Спрашивай!"
         elif command.lower() in ["хватит", "выход", "стоп", "пока"]:
             user_histories.pop(user_id, None)
             return jsonify({
@@ -77,7 +76,7 @@ def webhook():
                 "response": {"text": "До связи!", "end_session": True}
             })
         else:
-            text = ask_deepseek(user_id, command)
+            text = ask_openai(user_id, command)
 
         return jsonify({
             "version": version,
