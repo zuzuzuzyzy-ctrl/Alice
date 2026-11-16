@@ -12,10 +12,10 @@ user_histories = {}
 def ask_gemini(user_id, prompt):
     if not prompt.strip():
         return "Слушаю тебя. О чем хочешь спросить?"
-        
+
     history = user_histories.get(user_id, [])
     history.append({"role": "user", "parts": [{"text": prompt}]})
-    
+
     if len(history) > 4:
         history = history[-4:]
 
@@ -24,7 +24,7 @@ def ask_gemini(user_id, prompt):
         "Content-Type": "application/json",
         "X-goog-api-key": GEMINI_API_KEY
     }
-    
+
     payload = {
         "systemInstruction": {
             "parts": [{
@@ -40,23 +40,21 @@ def ask_gemini(user_id, prompt):
 
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=2.5)
-        
         if resp.status_code != 200:
             return f"Ошибка API: {resp.status_code}"
-            
+
         data = resp.json()
         candidates = data.get("candidates", [])
         if not candidates or "content" not in candidates[0]:
             return "Пустой ответ от модели."
-            
+
         answer = candidates[0]["content"].get("parts", [{}])[0].get("text", "").strip()
         if not answer:
             return "Не удалось получить текст ответа."
-            
+
         history.append({"role": "model", "parts": [{"text": answer}]})
         user_histories[user_id] = history
         return answer
-        
     except requests.exceptions.Timeout:
         return "Сеть подтупливает, повтори вопрос."
     except Exception as e:
