@@ -69,4 +69,32 @@ def webhook():
         is_new_session = session.get("new", False)
 
         if is_new_session and not command:
-            text = "Дипсик на связи. Спра
+            text = "Дипсик на связи. Спрашивай!"
+        elif command.lower() in ["хватит", "выход", "стоп", "пока"]:
+            user_histories.pop(user_id, None)
+            return jsonify({
+                "version": version,
+                "response": {"text": "До связи!", "end_session": True}
+            })
+        else:
+            text = ask_deepseek(user_id, command)
+
+        return jsonify({
+            "version": version,
+            "response": {
+                "text": text,
+                "end_session": False
+            }
+        })
+    except Exception:
+        return jsonify({
+            "version": "1.0",
+            "response": {
+                "text": "Ошибка обработки запроса.",
+                "end_session": False
+            }
+        })
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
