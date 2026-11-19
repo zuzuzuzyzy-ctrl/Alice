@@ -4,90 +4,73 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-MODEL_NAME = "gemini-1.5-flash"
+API_KEY = os.environ.get("API_KEY", "").strip()
+RAW_URL = os.environ.get("API_URL", "").strip()
+MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o-mini").strip()
+
+if RAW_URL and not RAW_URL.endswith("/chat/completions"):
+    API_URL = RAW_URL.rstrip("/") + "/chat/completions"
+else:
+    API_URL = RAW_URL
 
 user_histories = {}
 
-def ask_gemini(user_id, prompt):
+def ask_llm(user_id, prompt):
     if not prompt.strip():
         return "Слушаю тебя. О чем хочешь спросить?"
-        
-    history = user_histories.get(user_id, [])
-    
-    # Формируем историю для Gemini REST API (роли: user и model)
-    gemini_contents = []
-    for h in history:
-        role = "user" if h["role"] == "user" else "model"
-        gemini_contents.append({
-            "role": role,
-            "parts": [{"text": h["content"]}]
-        })
-    
-    # Добавляем текущий запрос
-    gemini_contents.append({
-        "role": "user",
-        "parts": [{"text": prompt}]
-    })
-    
-    if len(gemini_contents) > 6:
-        gemini_contents = gemini_contents[-6:]
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent"
-    
+    if not API_KEY or not API_URL:
+        return "Не заданы API_KEY или API_URL в настройках сервера."
+
+    history = user_histories.get(user_id, [])
+    history.append({"role": "user", "content": prompt})
+
+    if len(history) > 6:
+        history = history[-6:]
+
     headers = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {API_KEY}"
     }
-    
-    # Поддерживаем и Bearer-токены (AQ.), и обычные API-ключи
-    params = {}
-    if GEMINI_API_KEY.startswith("AQ.") or GEMINI_API_KEY.startswith("ya29."):
-        headers["Authorization"] = f"Bearer {GEMINI_API_KEY}"
-    else:
-        params["key"] = GEMINI_API_KEY
+
+    messages = [
+        {
+            "role": "system",
+            "content": "Ты голосовой ассистент в умной колонке. Отвечай на русском языке максимально кратко (1-2 предложения), без списков, звездочек и решеток."
+        }
+    ] + history
 
     payload = {
-        "contents": gemini_contents,
-        "system_instruction": {
-            "parts": [{"text": "Ты голосовой ассистент в умной колонке. Отвечай на русском языке максимально кратко (1-2 предложения), без списков и звездочек."}]
-        },
-        "generationConfig": {
-            "temperature": 0.7,
-            "maxOutputTokens": 150
-        }
+        "model": MODEL_NAME,
+        "messages": messages,
+        "max_tokens": 150,
+        "temperature": 0.7
     }
 
     try:
-        resp = requests.post(url, headers=headers, params=params, json=payload, timeout=5.0)
+        resp = requests.post(API_URL, headers=headers, json=payload, timeout=3.5)
         if resp.status_code != 200:
-            return f"Ошибка API: {resp.status_code} - {resp.text[:80]}"
-            
+            return f"Ошибка шлюза {resp.status_code}: {resp.text[:70]}"
+
         data = resp.json()
-        candidates = data.get("candidates", [])
-        if not candidates:
-            return "Пустой ответ от модели."
-            
-        answer = candidates[0]["content"]["parts"][0]["text"].strip()
+        answer = data["choices"][0]["message"]["content"].strip()
+        answer = answer.replace("*", "").replace("#", "")
+
         if not answer:
             return "Пустой ответ от модели."
-            
-        # Сохраняем в историю
-        history.append({"role": "user", "content": prompt})
-        history.append({"role": "model", "content": answer})
-        if len(history) > 6:
-            history = history[-6:]
+
+        history.append({"role": "assistant", "content": answer})
         user_histories[user_id] = history
-        
         return answer
     except requests.exceptions.Timeout:
-        return "Сеть подтупливает, повтори вопрос."
+        return "Нейросеть задумалась, повтори вопрос."
     except Exception as e:
         return f"Ошибка связи: {str(e)[:50]}"
 
 @app.route("/", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
-        return "Gemini Bot is active and running!", 200
+        return "Alice LLM Proxy Bot is running!", 200
 
     try:
         data = request.get_json(force=True, silent=True) or {}
@@ -98,7 +81,7 @@ def webhook():
         is_new_session = session.get("new", False)
 
         if is_new_session and not command:
-            text = "Gemini на связи. Спрашивай!"
+            text = "Нейросеть на связи. Спрашивай!"
         elif command.lower() in ["хватит", "выход", "стоп", "пока"]:
             user_histories.pop(user_id, None)
             return jsonify({
@@ -106,7 +89,7 @@ def webhook():
                 "response": {"text": "До связи!", "end_session": True}
             })
         else:
-            text = ask_gemini(user_id, command)
+            text = ask_llm(user_id, command)
 
         return jsonify({
             "version": version,
